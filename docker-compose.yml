@@ -1,0 +1,83 @@
+services:
+  # ===== Infrastructure =====
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: aag-postgres
+    environment:
+      POSTGRES_DB: aggregator
+      POSTGRES_USER: aag
+      POSTGRES_PASSWORD: aag_dev_pass
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aag -d aggregator"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: aag-redis
+    ports:
+      - "6380:6379"
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ===== Application =====
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: aag-backend
+    ports:
+      - "8081:8080"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Defaults — overridden by .env if present
+      APP_ENV: ${APP_ENV:-development}
+      APP_HOST: ${APP_HOST:-0.0.0.0}
+      APP_PORT: ${APP_PORT:-8080}
+      DATABASE_URL: ${DATABASE_URL:-postgres://aag:aag_dev_pass@postgres:5432/aggregator?sslmode=disable}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me-in-production!!}
+      API_KEY_PREFIX: ${API_KEY_PREFIX:-sk-aag-}
+      MOCK_PROVIDER_MODE: ${MOCK_PROVIDER_MODE:-true}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      DASHSCOPE_API_KEY_CN: ${DASHSCOPE_API_KEY_CN:-}
+      DASHSCOPE_API_KEY_INTL: ${DASHSCOPE_API_KEY_INTL:-}
+      DASHSCOPE_ENDPOINT_CN: ${DASHSCOPE_ENDPOINT_CN:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      DASHSCOPE_ENDPOINT_INTL: ${DASHSCOPE_ENDPOINT_INTL:-https://dashscope-intl.aliyuncs.com/compatible-mode/v1}
+      DEFAULT_RPM: ${DEFAULT_RPM:-60}
+      DEFAULT_TPM: ${DEFAULT_TPM:-100000}
+      DEFAULT_DAILY_QUOTA_USD: ${DEFAULT_DAILY_QUOTA_USD:-100.00}
+      NEW_USER_CREDITS_USD: ${NEW_USER_CREDITS_USD:-10.00}
+      DEFAULT_MARKUP: ${DEFAULT_MARKUP:-1.30}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: aag-frontend
+    ports:
+      - "5175:5173"
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8081}
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:

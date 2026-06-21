@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Build output
+frontend/dist/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+__MACOSX/
+Thumbs.db
+
+# Go
+backend/tmp/
+backend/vendor/
+
+# Docker
+docker-compose.override.yml
+
+# Logs
+*.log
