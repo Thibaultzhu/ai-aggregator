@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-aggregator-frontend
+spec:
+  replicas: {{ .Values.frontend.replicas }}
+  selector:
+    matchLabels:
+      app: ai-aggregator-frontend
+  template:
+    metadata:
+      labels:
+        app: ai-aggregator-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: {{ .Values.image.frontend | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.frontend.port }}
+          env:
+            {{- range $key, $value := .Values.frontend.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-aggregator-frontend
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app: ai-aggregator-frontend
+  ports:
+    - port: {{ .Values.frontend.port }}
+      targetPort: {{ .Values.frontend.port }}

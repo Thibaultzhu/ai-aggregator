@@ -3,27 +3,42 @@ package provider
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 )
 
 // MockAdapter implements the Adapter interface with predictable, hardcoded
 // responses. It is used for local development and testing when real upstream
 // provider credentials are not available (MOCK_PROVIDER_MODE=true).
-type MockAdapter struct{}
+type MockAdapter struct {
+	name string
+}
 
 // NewMockAdapter creates a new mock provider adapter.
 func NewMockAdapter() *MockAdapter {
-	return &MockAdapter{}
+	return NewMockAdapterWithName("mock")
+}
+
+// NewMockAdapterWithName creates a mock adapter bound to a provider ID.
+func NewMockAdapterWithName(name string) *MockAdapter {
+	if name == "" {
+		name = "mock"
+	}
+	return &MockAdapter{name: name}
 }
 
 // Compile-time interface check.
 var _ Adapter = (*MockAdapter)(nil)
 
 func (m *MockAdapter) Name() string {
-	return "mock"
+	return m.name
 }
 
 func (m *MockAdapter) ChatCompletion(_ context.Context, req *ChatRequest) (*ChatResponse, error) {
+	if m.shouldFail() {
+		return nil, fmt.Errorf("mock provider %s forced failure", m.name)
+	}
 	finishReason := "stop"
 	return &ChatResponse{
 		ID:      "chatcmpl-mock-001",
@@ -49,6 +64,9 @@ func (m *MockAdapter) ChatCompletion(_ context.Context, req *ChatRequest) (*Chat
 }
 
 func (m *MockAdapter) ChatCompletionStream(_ context.Context, req *ChatRequest) (<-chan StreamChunk, error) {
+	if m.shouldFail() {
+		return nil, fmt.Errorf("mock provider %s forced stream failure", m.name)
+	}
 	ch := make(chan StreamChunk, 10)
 
 	go func() {
@@ -178,5 +196,34 @@ func (m *MockAdapter) SynthesizeSpeech(_ context.Context, _ *SpeechRequest) ([]b
 }
 
 func (m *MockAdapter) HealthCheck(_ context.Context) error {
+	if m.shouldFailHealth() {
+		return fmt.Errorf("mock provider %s forced health failure", m.name)
+	}
 	return nil
+}
+
+func (m *MockAdapter) shouldFail() bool {
+	raw := os.Getenv("MOCK_FAIL_PROVIDER_IDS")
+	if raw == "" {
+		return false
+	}
+	for _, item := range strings.Split(raw, ",") {
+		if strings.TrimSpace(item) == m.name {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *MockAdapter) shouldFailHealth() bool {
+	raw := os.Getenv("MOCK_FAIL_HEALTH_PROVIDER_IDS")
+	if raw == "" {
+		return false
+	}
+	for _, item := range strings.Split(raw, ",") {
+		if strings.TrimSpace(item) == m.name {
+			return true
+		}
+	}
+	return false
 }

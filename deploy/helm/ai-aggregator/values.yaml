@@ -1,0 +1,33 @@
+image:
+  backend: ai-aggregator-backend:latest
+  frontend: ai-aggregator-frontend:latest
+  pullPolicy: IfNotPresent
+
+backend:
+  replicas: 1
+  port: 8080
+  env:
+    APP_ENV: production
+    APP_HOST: 0.0.0.0
+    APP_PORT: "8080"
+    MOCK_PROVIDER_MODE: "false"
+    DEFAULT_RPM: "60"
+    DEFAULT_TPM: "100000"
+    NEW_USER_CREDITS_USD: "10.00"
+    DEFAULT_MARKUP: "1.30"
+  secrets:
+    DATABASE_URL: ""
+    REDIS_URL: ""
+    JWT_SECRET: ""
+    DASHSCOPE_API_KEY: ""
+    DASHSCOPE_API_KEY_CN: ""
+    DASHSCOPE_API_KEY_INTL: ""
+
+frontend:
+  replicas: 1
+  port: 5173
+  env:
+    VITE_API_BASE_URL: http://ai-aggregator-backend:8080
+
+service:
+  type: ClusterIP

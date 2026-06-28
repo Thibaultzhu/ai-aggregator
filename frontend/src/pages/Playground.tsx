@@ -1,22 +1,28 @@
 import { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
-import { Zap, Image, Video, Mic, MessageSquare, Settings2, Code2, Copy, Check, AlertCircle, Key } from 'lucide-react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { Zap, Image, Video, Mic, MessageSquare, Settings2, Code2, Copy, Check, AlertCircle, Key, Braces, RefreshCw } from 'lucide-react'
 import * as api from '@/lib/api'
-import type { ModelInfo, ChatCompletionResponse, ChatMessage } from '@/lib/api'
+import type { AsyncTaskDetail, AsyncTaskResponse, ChatCompletionResponse, ChatMessage, EmbeddingResponse, ModelInfo } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
-type TabId = 'image' | 'video' | 'audio' | 'text'
+type TabId = 'image' | 'video' | 'audio' | 'text' | 'embedding'
 
 const tabs = [
   { id: 'image' as const, label: 'Image', icon: Image },
   { id: 'video' as const, label: 'Video', icon: Video },
   { id: 'audio' as const, label: 'Audio', icon: Mic },
+  { id: 'embedding' as const, label: 'Embedding', icon: Braces },
   { id: 'text' as const, label: 'Text', icon: MessageSquare },
 ]
 
 export default function Playground() {
-  const [activeTab, setActiveTab] = useState<TabId>('text')
-  const [prompt, setPrompt] = useState('')
+  const [searchParams] = useSearchParams()
+  const initialTab = parsePlaygroundTab(searchParams.get('tab'))
+  const initialModel = searchParams.get('model') || ''
+  const initialPrompt = searchParams.get('prompt') || ''
+
+  const [activeTab, setActiveTab] = useState<TabId>(initialTab)
+  const [prompt, setPrompt] = useState(initialPrompt)
   const [generating, setGenerating] = useState(false)
   const [showCode, setShowCode] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -24,14 +30,24 @@ export default function Playground() {
   // Model loading
   const [models, setModels] = useState<ModelInfo[]>([])
   const [modelsLoading, setModelsLoading] = useState(true)
-  const [selectedModel, setSelectedModel] = useState('')
+  const [selectedModel, setSelectedModel] = useState(initialModel)
 
   // Text params
   const [temperature, setTemperature] = useState(0.7)
   const [maxTokens, setMaxTokens] = useState(2048)
+  const [imageSize, setImageSize] = useState('1024*1024')
+  const [imageCount, setImageCount] = useState(1)
+  const [videoDuration, setVideoDuration] = useState(5)
+  const [videoResolution, setVideoResolution] = useState('720p')
+  const [videoImageUrl, setVideoImageUrl] = useState('')
+  const [audioVoice, setAudioVoice] = useState('longxiaochun')
+  const [audioFormat, setAudioFormat] = useState('mp3')
 
   // Response state
   const [response, setResponse] = useState<ChatCompletionResponse | null>(null)
+  const [embeddingResponse, setEmbeddingResponse] = useState<EmbeddingResponse | null>(null)
+  const [asyncTask, setAsyncTask] = useState<AsyncTaskResponse | AsyncTaskDetail | null>(null)
+  const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [responseLatency, setResponseLatency] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -70,13 +86,11 @@ export default function Playground() {
         const res = await api.listModels()
         if (!cancelled) {
           setModels(res.data)
-          // Default to first text model
-          const textModels = res.data.filter((m) => m.modality === 'text')
-          if (textModels.length > 0) {
-            setSelectedModel(textModels[0].id)
-          } else if (res.data.length > 0) {
-            setSelectedModel(res.data[0].id)
-          }
+          const defaultModels = res.data.filter((m) => m.modality === initialTab)
+          const initialSelection = initialModel && res.data.some((m) => m.id === initialModel)
+            ? initialModel
+            : (defaultModels[0] ?? res.data[0])?.id ?? ''
+          setSelectedModel(initialSelection)
         }
       } catch {
         // Non-critical: model selector will just be empty
@@ -89,8 +103,30 @@ export default function Playground() {
     return () => { cancelled = true }
   }, [])
 
-  // Filter models by tab
-  const textModels = models.filter((m) => m.modality === 'text')
+  const availableModels = models.filter((m) => {
+    if (activeTab === 'embedding') return m.modality === 'embedding'
+    if (activeTab === 'image') return m.modality === 'image'
+    if (activeTab === 'video') return m.modality === 'video'
+    if (activeTab === 'audio') return m.modality === 'audio'
+    return m.modality === 'text'
+  })
+
+  useEffect(() => {
+    if (modelsLoading) return
+    if (availableModels.length === 0) {
+      setSelectedModel('')
+      return
+    }
+    if (!availableModels.some((m) => m.id === selectedModel)) {
+      setSelectedModel(availableModels[0].id)
+    }
+  }, [activeTab, availableModels, modelsLoading, selectedModel])
+
+  useEffect(() => {
+    return () => {
+      if (audioUrl) URL.revokeObjectURL(audioUrl)
+    }
+  }, [audioUrl])
 
   const handleGenerate = async () => {
     if (!prompt.trim() || !selectedModel) return
@@ -98,19 +134,59 @@ export default function Playground() {
     setGenerating(true)
     setError(null)
     setResponse(null)
-
-    const messages: ChatMessage[] = [
-      { role: 'user', content: prompt },
-    ]
+    setEmbeddingResponse(null)
+    setAsyncTask(null)
+    if (audioUrl) {
+      URL.revokeObjectURL(audioUrl)
+      setAudioUrl(null)
+    }
 
     const startTime = performance.now()
     try {
-      const res = await api.chatCompletion(selectedModel, messages, {
-        temperature,
-        max_tokens: maxTokens,
-      })
+      if (activeTab === 'text') {
+        const messages: ChatMessage[] = [{ role: 'user', content: prompt }]
+        const res = await api.chatCompletion(selectedModel, messages, {
+          temperature,
+          max_tokens: maxTokens,
+        })
+        setResponse(res)
+      } else if (activeTab === 'embedding') {
+        const res = await api.createEmbedding({ model: selectedModel, input: prompt })
+        setEmbeddingResponse(res)
+      } else if (activeTab === 'image') {
+        const submitted = await api.createImageGeneration({
+          model: selectedModel,
+          prompt,
+          n: imageCount,
+          size: imageSize,
+          response_format: 'url',
+        })
+        setAsyncTask(submitted)
+        const detail = await pollAsyncTask(submitted.id, 'image')
+        setAsyncTask(detail)
+      } else if (activeTab === 'video') {
+        const submitted = await api.createVideoGeneration({
+          model: selectedModel,
+          prompt,
+          image_url: videoImageUrl.trim() || undefined,
+          duration: videoDuration,
+          resolution: videoResolution,
+        })
+        setAsyncTask(submitted)
+        const detail = await pollAsyncTask(submitted.id, 'video')
+        setAsyncTask(detail)
+      } else if (activeTab === 'audio') {
+        const blob = await api.createSpeech({
+          model: selectedModel,
+          input: prompt,
+          voice: audioVoice,
+          response_format: audioFormat,
+        })
+        setAudioUrl(URL.createObjectURL(blob))
+      } else {
+        throw new Error('Unsupported playground tab.')
+      }
       const elapsed = Math.round(performance.now() - startTime)
-      setResponse(res)
       setResponseLatency(elapsed)
     } catch (err) {
       if (err instanceof api.ApiError) {
@@ -135,15 +211,30 @@ export default function Playground() {
         : '[Complex content]'
       : null
 
-  const codeSnippet = `curl https://api.example.com/v1/chat/completions \\
+  const endpoint = activeTab === 'embedding'
+    ? '/v1/embeddings'
+    : activeTab === 'image'
+      ? '/v1/images/generations'
+      : activeTab === 'video'
+        ? '/v1/video/generations'
+        : activeTab === 'audio'
+          ? '/v1/audio/speech'
+          : '/v1/chat/completions'
+
+  const requestBody = activeTab === 'embedding'
+    ? { model: selectedModel || 'text-embedding-v3', input: prompt || 'hello embedding' }
+    : activeTab === 'image'
+      ? { model: selectedModel || 'wan-image', prompt: prompt || 'a simple red cube', n: imageCount, size: imageSize, response_format: 'url' }
+      : activeTab === 'video'
+        ? { model: selectedModel || 'wan2.7-t2v', prompt: prompt || 'a simple red cube rotating', duration: videoDuration, resolution: videoResolution, image_url: videoImageUrl || undefined }
+        : activeTab === 'audio'
+          ? { model: selectedModel || 'cosyvoice-v2', input: prompt || 'Say hello from AI Aggregator', voice: audioVoice, response_format: audioFormat }
+          : { model: selectedModel || 'qwen-max', messages: [{ role: 'user', content: prompt || 'Hello!' }], temperature, max_tokens: maxTokens }
+
+  const codeSnippet = `curl http://localhost:8081${endpoint} \\
   -H "Authorization: Bearer sk-aggr-xxxx" \\
   -H "Content-Type: application/json" \\
-  -d '{
-    "model": "${selectedModel || 'qwen-max'}",
-    "messages": [{"role": "user", "content": "${prompt || 'Hello!'}"}],
-    "temperature": ${temperature},
-    "max_tokens": ${maxTokens}
-  }'`
+  -d '${JSON.stringify(requestBody, null, 2)}'`
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -229,11 +320,10 @@ export default function Playground() {
             ))}
           </div>
 
-          {/* Non-text tabs disabled notice */}
-          {activeTab !== 'text' && (
+          {activeTab === 'audio' && (
             <div className="card p-4 flex items-center gap-3 text-sm text-gray-400">
-              <AlertCircle className="w-5 h-5 text-yellow-500 flex-shrink-0" />
-              <span>{activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} generation is coming soon. Text chat is available for MVP.</span>
+              <Mic className="w-5 h-5 text-green-400 flex-shrink-0" />
+              <span>Text-to-speech is wired through the Aggregator API. Speech-to-text is available through the direct API endpoint with multipart upload.</span>
             </div>
           )}
 
@@ -245,15 +335,15 @@ export default function Playground() {
                 <span className="w-4 h-4 border-2 border-gray-600 border-t-gray-400 rounded-full animate-spin" />
                 Loading models...
               </div>
-            ) : textModels.length === 0 ? (
-              <div className="text-sm text-gray-500 py-2">No text models available</div>
+            ) : availableModels.length === 0 ? (
+              <div className="text-sm text-gray-500 py-2">No {activeTab} models available</div>
             ) : (
               <select
                 className="input"
                 value={selectedModel}
                 onChange={(e) => setSelectedModel(e.target.value)}
               >
-                {textModels.map((m) => (
+                {availableModels.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.display_name || m.id} ({m.id})
                   </option>
@@ -283,18 +373,18 @@ export default function Playground() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <span className="text-xs text-gray-500">Size</span>
-                    <select className="input text-sm mt-1">
-                      <option>1024x1024</option>
-                      <option>1536x1024</option>
-                      <option>1024x1536</option>
+                    <select className="input text-sm mt-1" value={imageSize} onChange={(e) => setImageSize(e.target.value)}>
+                      <option value="1024*1024">1024*1024</option>
+                      <option value="1536*1024">1536*1024</option>
+                      <option value="1024*1536">1024*1536</option>
                     </select>
                   </div>
                   <div>
                     <span className="text-xs text-gray-500">Count</span>
-                    <select className="input text-sm mt-1">
-                      <option>1</option>
-                      <option>2</option>
-                      <option>4</option>
+                    <select className="input text-sm mt-1" value={imageCount} onChange={(e) => setImageCount(Number(e.target.value))}>
+                      <option value={1}>1</option>
+                      <option value={2}>2</option>
+                      <option value={4}>4</option>
                     </select>
                   </div>
                 </div>
@@ -304,18 +394,28 @@ export default function Playground() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <span className="text-xs text-gray-500">Duration (sec)</span>
-                    <select className="input text-sm mt-1">
-                      <option>5</option>
-                      <option>10</option>
+                    <select className="input text-sm mt-1" value={videoDuration} onChange={(e) => setVideoDuration(Number(e.target.value))}>
+                      <option value={5}>5</option>
+                      <option value={10}>10</option>
                     </select>
                   </div>
                   <div>
                     <span className="text-xs text-gray-500">Resolution</span>
-                    <select className="input text-sm mt-1">
-                      <option>720p</option>
-                      <option>1080p</option>
+                    <select className="input text-sm mt-1" value={videoResolution} onChange={(e) => setVideoResolution(e.target.value)}>
+                      <option value="720p">720p</option>
+                      <option value="1080p">1080p</option>
                     </select>
                   </div>
+                  <div className="col-span-2">
+                    <span className="text-xs text-gray-500">Image URL (optional)</span>
+                    <input className="input text-sm mt-1" value={videoImageUrl} onChange={(e) => setVideoImageUrl(e.target.value)} placeholder="https://..." />
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'embedding' && (
+                <div className="rounded-lg bg-gray-950 border border-gray-800 px-3 py-2 text-xs text-gray-500">
+                  Returns vector dimensions, usage tokens, and a preview of the first embedding.
                 </div>
               )}
 
@@ -323,18 +423,19 @@ export default function Playground() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <span className="text-xs text-gray-500">Voice</span>
-                    <select className="input text-sm mt-1">
-                      <option>alloy</option>
-                      <option>echo</option>
-                      <option>shimmer</option>
+                    <select className="input text-sm mt-1" value={audioVoice} onChange={(e) => setAudioVoice(e.target.value)}>
+                      <option value="longxiaochun">longxiaochun</option>
+                      <option value="longwan">longwan</option>
+                      <option value="longcheng">longcheng</option>
+                      <option value="longhua">longhua</option>
                     </select>
                   </div>
                   <div>
                     <span className="text-xs text-gray-500">Format</span>
-                    <select className="input text-sm mt-1">
-                      <option>mp3</option>
-                      <option>wav</option>
-                      <option>opus</option>
+                    <select className="input text-sm mt-1" value={audioFormat} onChange={(e) => setAudioFormat(e.target.value)}>
+                      <option value="mp3">mp3</option>
+                      <option value="wav">wav</option>
+                      <option value="opus">opus</option>
                     </select>
                   </div>
                 </div>
@@ -379,7 +480,7 @@ export default function Playground() {
             {/* Generate button */}
             <button
               onClick={handleGenerate}
-              disabled={!prompt.trim() || generating || !selectedModel || activeTab !== 'text' || !hasKey}
+              disabled={!prompt.trim() || generating || !selectedModel || !hasKey}
               className="btn-primary w-full mt-6 flex items-center justify-center gap-2"
             >
               {generating ? (
@@ -443,6 +544,56 @@ export default function Playground() {
                   <p className="text-gray-400">Generating...</p>
                 </div>
               </div>
+            ) : audioUrl ? (
+              <div className="p-5">
+                <div className="flex items-center gap-4 mb-4 pb-4 border-b border-gray-800 text-xs text-gray-500">
+                  <span>Model: <span className="text-gray-300">{selectedModel}</span></span>
+                  <span>Voice: <span className="text-gray-300">{audioVoice}</span></span>
+                  <span>Format: <span className="text-gray-300">{audioFormat}</span></span>
+                  {responseLatency !== null && (
+                    <span>Latency: <span className="text-gray-300">{responseLatency}ms</span></span>
+                  )}
+                </div>
+                <audio controls src={audioUrl} className="w-full" />
+              </div>
+            ) : embeddingResponse ? (
+              <div className="p-5">
+                <div className="flex items-center gap-4 mb-4 pb-4 border-b border-gray-800 text-xs text-gray-500">
+                  <span>Model: <span className="text-gray-300">{embeddingResponse.model}</span></span>
+                  <span>Vectors: <span className="text-gray-300">{embeddingResponse.data.length}</span></span>
+                  <span>Dimensions: <span className="text-gray-300">{embeddingResponse.data[0]?.embedding.length ?? 0}</span></span>
+                  <span>Tokens: <span className="text-gray-300">{embeddingResponse.usage?.total_tokens ?? 0}</span></span>
+                  {responseLatency !== null && (
+                    <span>Latency: <span className="text-gray-300">{responseLatency}ms</span></span>
+                  )}
+                </div>
+                <JsonOutput value={{
+                  object: embeddingResponse.object,
+                  model: embeddingResponse.model,
+                  usage: embeddingResponse.usage,
+                  preview: embeddingResponse.data.map((item) => ({
+                    index: item.index,
+                    dimensions: item.embedding.length,
+                    first_values: item.embedding.slice(0, 12),
+                  })),
+                }} />
+              </div>
+            ) : asyncTask ? (
+              <div className="p-5">
+                <div className="flex items-center justify-between gap-3 mb-4 pb-4 border-b border-gray-800">
+                  <div>
+                    <p className="text-sm font-medium text-gray-200">Async Task</p>
+                    <code className="text-xs text-gray-600">{asyncTask.id}</code>
+                  </div>
+                  <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ${
+                    asyncTask.status === 'completed' ? 'bg-green-500/10 text-green-400' : asyncTask.status === 'failed' ? 'bg-red-500/10 text-red-400' : 'bg-yellow-500/10 text-yellow-400'
+                  }`}>
+                    {asyncTask.status === 'completed' ? <Check className="w-3 h-3" /> : <RefreshCw className="w-3 h-3" />}
+                    {asyncTask.status}
+                  </span>
+                </div>
+                <JsonOutput value={asyncTask} />
+              </div>
             ) : responseText ? (
               <div className="p-5">
                 {/* Usage stats bar */}
@@ -473,7 +624,7 @@ export default function Playground() {
             ) : (
               <div className="flex items-center justify-center h-full min-h-[400px]">
                 <div className="text-center text-gray-600 p-8">
-                  <MessageSquare className="w-16 h-16 mx-auto mb-3 opacity-20" />
+                  {activeTab === 'image' ? <Image className="w-16 h-16 mx-auto mb-3 opacity-20" /> : activeTab === 'video' ? <Video className="w-16 h-16 mx-auto mb-3 opacity-20" /> : activeTab === 'audio' ? <Mic className="w-16 h-16 mx-auto mb-3 opacity-20" /> : activeTab === 'embedding' ? <Braces className="w-16 h-16 mx-auto mb-3 opacity-20" /> : <MessageSquare className="w-16 h-16 mx-auto mb-3 opacity-20" />}
                   <p className="text-sm">Enter a prompt and click Generate to see results</p>
                   <p className="text-xs text-gray-700 mt-1">Press Cmd/Ctrl+Enter to submit</p>
                 </div>
@@ -483,5 +634,33 @@ export default function Playground() {
         </div>
       </div>
     </div>
+  )
+}
+
+async function pollAsyncTask(taskId: string, kind: 'image' | 'video'): Promise<AsyncTaskDetail> {
+  const fetchTask = kind === 'image' ? api.getImageGenerationTask : api.getVideoGenerationTask
+  let latest = await fetchTask(taskId)
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    if (['completed', 'failed', 'cancelled'].includes(latest.status)) {
+      return latest
+    }
+    await new Promise((resolve) => setTimeout(resolve, attempt < 2 ? 700 : 1500))
+    latest = await fetchTask(taskId)
+  }
+  return latest
+}
+
+function parsePlaygroundTab(value: string | null): TabId {
+  if (value === 'image' || value === 'video' || value === 'audio' || value === 'embedding' || value === 'text') {
+    return value
+  }
+  return 'text'
+}
+
+function JsonOutput({ value }: { value: unknown }) {
+  return (
+    <pre className="rounded-lg bg-gray-950 border border-gray-800 p-4 text-xs text-gray-300 overflow-auto max-h-[520px] whitespace-pre-wrap">
+      {JSON.stringify(value, null, 2)}
+    </pre>
   )
 }

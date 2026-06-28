@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -189,9 +191,7 @@ func (d *DashScopeAdapter) CreateImage(ctx context.Context, req *ImageRequest) (
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	// Use the native DashScope API for image generation
-	nativeURL := strings.Replace(d.baseURL, "/compatible-mode/v1", "/api/v1/services/aigc/text2image/image-synthesis", 1)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, nativeURL, bytes.NewReader(jsonBody))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, d.nativeURL("/api/v1/services/aigc/text2image/image-synthesis"), bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -256,8 +256,7 @@ func (d *DashScopeAdapter) CreateVideo(ctx context.Context, req *VideoRequest) (
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	nativeURL := strings.Replace(d.baseURL, "/compatible-mode/v1", "/api/v1/services/aigc/video-generation/generation", 1)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, nativeURL, bytes.NewReader(jsonBody))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, d.nativeURL("/api/v1/services/aigc/video-generation/generation"), bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -296,8 +295,7 @@ func (d *DashScopeAdapter) CreateVideo(ctx context.Context, req *VideoRequest) (
 // ===== Poll Async Task =====
 
 func (d *DashScopeAdapter) PollTask(ctx context.Context, upstreamTaskID string) (*AsyncTaskResult, error) {
-	nativeURL := strings.Replace(d.baseURL, "/compatible-mode/v1", "/api/v1/tasks/"+upstreamTaskID, 1)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, nativeURL, nil)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, d.nativeURL("/api/v1/tasks/"+upstreamTaskID), nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -377,14 +375,139 @@ func (d *DashScopeAdapter) CreateEmbedding(ctx context.Context, req *EmbeddingRe
 	return &embResp, nil
 }
 
-// ===== Audio (TODO: implement) =====
+// ===== Audio =====
 
 func (d *DashScopeAdapter) TranscribeAudio(ctx context.Context, req *TranscribeRequest) (string, error) {
-	return "", &ErrUnsupportedModality{Provider: d.name, Op: "transcribe_audio"}
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	if err := writer.WriteField("model", req.Model); err != nil {
+		return "", fmt.Errorf("write model field: %w", err)
+	}
+	if req.Language != "" {
+		if err := writer.WriteField("language", req.Language); err != nil {
+			return "", fmt.Errorf("write language field: %w", err)
+		}
+	}
+
+	filename := req.Filename
+	if filename == "" {
+		filename = "audio"
+	}
+	part, err := writer.CreateFormFile("file", filepath.Base(filename))
+	if err != nil {
+		return "", fmt.Errorf("create file field: %w", err)
+	}
+	if _, err := io.Copy(part, req.File); err != nil {
+		return "", fmt.Errorf("copy audio file: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return "", fmt.Errorf("close multipart writer: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, d.nativeURL("/api/v1/services/audio/asr/transcription"), &body)
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+d.apiKey)
+	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err := d.httpClient.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("do request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", d.parseError(resp)
+	}
+
+	var result struct {
+		Text   string `json:"text"`
+		Output struct {
+			Text       string `json:"text"`
+			Sentence   string `json:"sentence"`
+			Transcript string `json:"transcript"`
+		} `json:"output"`
+		Result struct {
+			Text string `json:"text"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode response: %w", err)
+	}
+	switch {
+	case result.Text != "":
+		return result.Text, nil
+	case result.Output.Text != "":
+		return result.Output.Text, nil
+	case result.Output.Transcript != "":
+		return result.Output.Transcript, nil
+	case result.Output.Sentence != "":
+		return result.Output.Sentence, nil
+	case result.Result.Text != "":
+		return result.Result.Text, nil
+	default:
+		return "", fmt.Errorf("decode response: missing transcription text")
+	}
 }
 
 func (d *DashScopeAdapter) SynthesizeSpeech(ctx context.Context, req *SpeechRequest) ([]byte, string, error) {
-	return nil, "", &ErrUnsupportedModality{Provider: d.name, Op: "synthesize_speech"}
+	body := map[string]interface{}{
+		"model": req.Model,
+		"input": map[string]interface{}{
+			"text": req.Input,
+		},
+		"parameters": map[string]interface{}{
+			"voice":           req.Voice,
+			"response_format": req.ResponseFormat,
+		},
+	}
+	if req.Speed > 0 {
+		body["parameters"].(map[string]interface{})["speed"] = req.Speed
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, "", fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, d.nativeURL("/api/v1/services/audio/tts/speech-synthesizer"), bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, "", fmt.Errorf("create request: %w", err)
+	}
+	d.setHeaders(httpReq)
+
+	resp, err := d.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, "", fmt.Errorf("do request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", d.parseError(resp)
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	audioBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", fmt.Errorf("read response: %w", err)
+	}
+	if strings.HasPrefix(contentType, "application/json") {
+		var result struct {
+			Output struct {
+				Audio string `json:"audio"`
+				URL   string `json:"url"`
+			} `json:"output"`
+		}
+		if err := json.Unmarshal(audioBytes, &result); err == nil && result.Output.Audio != "" {
+			return []byte(result.Output.Audio), "text/plain", nil
+		}
+	}
+	if contentType == "" {
+		contentType = contentTypeForAudioFormat(req.ResponseFormat)
+	}
+	return audioBytes, contentType, nil
 }
 
 // ===== Health Check =====
@@ -419,6 +542,28 @@ func (d *DashScopeAdapter) HealthCheck(ctx context.Context) error {
 func (d *DashScopeAdapter) setHeaders(req *http.Request) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+d.apiKey)
+}
+
+func (d *DashScopeAdapter) nativeURL(path string) string {
+	if strings.Contains(d.baseURL, "/compatible-mode/v1") {
+		return strings.Replace(d.baseURL, "/compatible-mode/v1", path, 1)
+	}
+	return strings.TrimRight(d.baseURL, "/") + path
+}
+
+func contentTypeForAudioFormat(format string) string {
+	switch strings.ToLower(format) {
+	case "wav":
+		return "audio/wav"
+	case "opus":
+		return "audio/opus"
+	case "aac":
+		return "audio/aac"
+	case "flac":
+		return "audio/flac"
+	default:
+		return "audio/mpeg"
+	}
 }
 
 func (d *DashScopeAdapter) parseError(resp *http.Response) error {

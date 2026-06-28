@@ -38,15 +38,19 @@ func (l *Limiter) Middleware(c *fiber.Ctx) error {
 
 	id := fmt.Sprintf("%v", keyID)
 	ctx := c.UserContext()
+	limit := l.defaultRPM
+	if override, ok := c.Locals("rate_limit_rpm").(int); ok && override > 0 {
+		limit = override
+	}
 
-	allowed, remaining, retryAfter, err := l.checkRPM(ctx, id, l.defaultRPM)
+	allowed, remaining, retryAfter, err := l.checkRPM(ctx, id, limit)
 	if err != nil {
 		// Fail-open on Redis errors
 		slog.Warn("rate limit check failed, allowing request", "error", err, "key", id)
 		return c.Next()
 	}
 
-	c.Set("X-RateLimit-Limit", strconv.Itoa(l.defaultRPM))
+	c.Set("X-RateLimit-Limit", strconv.Itoa(limit))
 	c.Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
 
 	if !allowed {
@@ -120,8 +124,11 @@ func (l *Limiter) checkRPM(ctx context.Context, id string, limit int) (allowed b
 }
 
 // CheckTokenLimit checks TPM (tokens per minute) using a simple counter.
-func (l *Limiter) CheckTokenLimit(ctx context.Context, keyID string, tokens int) (bool, error) {
-	if l.defaultTPM <= 0 {
+func (l *Limiter) CheckTokenLimit(ctx context.Context, keyID string, tokens, limit int) (bool, error) {
+	if limit <= 0 {
+		limit = l.defaultTPM
+	}
+	if limit <= 0 || tokens <= 0 {
 		return true, nil
 	}
 	key := fmt.Sprintf("ratelimit:%s:tpm", keyID)
@@ -135,7 +142,7 @@ func (l *Limiter) CheckTokenLimit(ctx context.Context, keyID string, tokens int)
 		return true, err // fail-open
 	}
 
-	return incrCmd.Val() <= int64(l.defaultTPM), nil
+	return incrCmd.Val() <= int64(limit), nil
 }
 
 // IncrConcurrency increments the concurrent request counter.

@@ -10,6 +10,10 @@ import Login from '@/pages/Login'
 import Dashboard from '@/pages/Dashboard'
 import ApiKeys from '@/pages/ApiKeys'
 import Billing from '@/pages/Billing'
+import RequestLogs from '@/pages/RequestLogs'
+import Workflows from '@/pages/Workflows'
+import Files from '@/pages/Files'
+import Settings from '@/pages/Settings'
 import Admin from '@/pages/Admin'
 
 export default function App() {
@@ -30,6 +34,10 @@ export default function App() {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/dashboard/keys" element={<ApiKeys />} />
         <Route path="/dashboard/billing" element={<Billing />} />
+        <Route path="/dashboard/request-logs" element={<RequestLogs />} />
+        <Route path="/dashboard/workflows" element={<Workflows />} />
+        <Route path="/dashboard/files" element={<Files />} />
+        <Route path="/dashboard/settings" element={<Settings />} />
       </Route>
 
       {/* Admin (separate layout) */}

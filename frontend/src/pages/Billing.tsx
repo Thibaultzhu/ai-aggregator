@@ -51,6 +51,7 @@ export default function Billing() {
   const [balance, setBalance] = useState<number | null>(null)
   const [transactions, setTransactions] = useState<BillingTransaction[]>([])
   const [loading, setLoading] = useState(true)
+  const [showTopUpInfo, setShowTopUpInfo] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // Auth guard: redirect to login if not authenticated
@@ -153,7 +154,10 @@ export default function Billing() {
             </p>
           </div>
           <div className="flex flex-col gap-2">
-            <button className="btn-primary flex items-center gap-2">
+            <button
+              onClick={() => setShowTopUpInfo((current) => !current)}
+              className="btn-primary flex items-center gap-2"
+            >
               <ArrowUpRight className="w-4 h-4" /> Add Credits
             </button>
             <button
@@ -165,6 +169,29 @@ export default function Billing() {
             </button>
           </div>
         </div>
+        {showTopUpInfo && (
+          <div className="mt-5 rounded-lg border border-brand-500/20 bg-brand-500/5 p-4">
+            <h3 className="text-sm font-semibold text-brand-300">Credit top-up flow</h3>
+            <p className="text-sm text-gray-400 mt-2 leading-relaxed">
+              This deployment is currently running in prepaid balance mode. Self-service checkout is not configured yet;
+              credits are granted by an admin from the Admin Users page and usage charges are deducted automatically after each API call.
+            </p>
+            <div className="mt-3 grid sm:grid-cols-3 gap-3 text-xs text-gray-500">
+              <div className="rounded border border-gray-800 bg-gray-950/60 p-3">
+                <p className="font-medium text-gray-300">1. Request credits</p>
+                <p className="mt-1">Ask an admin to grant balance to your account.</p>
+              </div>
+              <div className="rounded border border-gray-800 bg-gray-950/60 p-3">
+                <p className="font-medium text-gray-300">2. Admin grant</p>
+                <p className="mt-1">Admin records a `credit_grant` transaction.</p>
+              </div>
+              <div className="rounded border border-gray-800 bg-gray-950/60 p-3">
+                <p className="font-medium text-gray-300">3. Usage billing</p>
+                <p className="mt-1">Model calls create `usage_charge` rows.</p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Transaction History */}

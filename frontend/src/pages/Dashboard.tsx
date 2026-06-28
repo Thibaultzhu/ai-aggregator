@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { BarChart3, TrendingUp, Zap, DollarSign, Wallet } from 'lucide-react'
+import { AlertTriangle, BarChart3, Clock, TrendingUp, Zap, DollarSign, Wallet } from 'lucide-react'
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts'
 import * as api from '@/lib/api'
 import type { DashboardData } from '@/lib/api'
@@ -113,6 +113,10 @@ export default function Dashboard() {
     { label: 'Total Requests', value: formatNumber(dashboard?.total_requests ?? 0), icon: BarChart3 },
     { label: 'Total Cost', value: formatCurrency(dashboard?.total_cost ?? 0), icon: DollarSign },
     { label: 'Total Tokens', value: formatNumber(dashboard?.total_tokens ?? 0), icon: Zap },
+    { label: 'Avg Latency', value: `${Math.round(dashboard?.average_latency_ms ?? avgLatency)}ms`, icon: Clock },
+    { label: 'P95 Latency', value: `${Math.round(dashboard?.p95_latency_ms ?? 0)}ms`, icon: Clock },
+    { label: 'P99 Latency', value: `${Math.round(dashboard?.p99_latency_ms ?? 0)}ms`, icon: Clock },
+    { label: 'Error Rate', value: `${((dashboard?.error_rate ?? 0) * 100).toFixed(2)}%`, icon: AlertTriangle },
     { label: 'Balance', value: formatCurrency(dashboard?.balance ?? 0), icon: Wallet },
   ]
 
@@ -124,7 +128,7 @@ export default function Dashboard() {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-4 mb-8">
         {stats.map(({ label, value, icon: Icon }) => (
           <div key={label} className="card p-5">
             <div className="flex items-center justify-between mb-3">

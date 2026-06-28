@@ -38,6 +38,8 @@ type Config struct {
 	OSSAccessKeySecret string
 	OSSBucket          string
 	OSSEndpoint        string
+	FileStorageBackend string
+	FileStorageDir     string
 
 	// Rate Limits
 	DefaultRPM        int
@@ -78,6 +80,8 @@ func Load() (*Config, error) {
 		OSSAccessKeySecret: getEnv("OSS_ACCESS_KEY_SECRET", ""),
 		OSSBucket:          getEnv("OSS_BUCKET", "aggr-dev-artifacts"),
 		OSSEndpoint:        getEnv("OSS_ENDPOINT", "oss-ap-southeast-5.aliyuncs.com"),
+		FileStorageBackend: strings.ToLower(getEnv("FILE_STORAGE_BACKEND", "local")),
+		FileStorageDir:     getEnv("FILE_STORAGE_DIR", "/tmp/ai-aggregator-files"),
 
 		DefaultRPM:        rpm,
 		DefaultTPM:        tpm,

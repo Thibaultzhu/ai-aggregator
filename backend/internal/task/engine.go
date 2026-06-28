@@ -2,7 +2,11 @@ package task
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,11 +24,11 @@ type Config struct {
 
 // Engine manages async tasks (image/video generation).
 type Engine struct {
-	store   *storage.Store
-	router  *router.ModelRouter
-	config  Config
-	wg      sync.WaitGroup
-	cancel  context.CancelFunc
+	store  *storage.Store
+	router *router.ModelRouter
+	config Config
+	wg     sync.WaitGroup
+	cancel context.CancelFunc
 }
 
 func NewEngine(store *storage.Store, router *router.ModelRouter, cfg Config) *Engine {
@@ -159,15 +163,26 @@ func (e *Engine) pollTasks(ctx context.Context, workerID int) {
 			continue
 		}
 
-		if result.Status == "completed" || result.Status == "failed" {
+		status := normalizeTaskStatus(result.Status)
+		if status == "completed" || status == "failed" {
 			var resultData map[string]interface{}
 			if result.Data != nil {
-				// TODO: convert result.Data to map
+				resultData = map[string]interface{}{
+					"data":  result.Data,
+					"usage": result.Usage,
+				}
+				if result.Error != nil {
+					resultData["error"] = result.Error
+				}
+				encoded, err := json.Marshal(resultData)
+				if err == nil {
+					_ = json.Unmarshal(encoded, &resultData)
+				}
 			}
-			if err := e.store.UpdateTaskStatus(ctx, task.ExternalID, result.Status, resultData); err != nil {
+			if err := e.store.UpdateTaskStatus(ctx, task.ExternalID, status, resultData); err != nil {
 				slog.Error("failed to update task", "task_id", task.ExternalID, "error", err)
 			} else {
-				slog.Info("task completed", "task_id", task.ExternalID, "status", result.Status)
+				slog.Info("task completed", "task_id", task.ExternalID, "status", status)
 			}
 		}
 	}
@@ -176,8 +191,26 @@ func (e *Engine) pollTasks(ctx context.Context, workerID int) {
 // ===== Helpers =====
 
 func generateTaskID() string {
-	// TODO: "task_" + random 16 hex chars
-	return "task_" + time.Now().Format("20060102150405")
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "task_" + time.Now().Format("20060102150405")
+	}
+	return "task_" + hex.EncodeToString(b[:])
+}
+
+func normalizeTaskStatus(status string) string {
+	switch strings.ToUpper(status) {
+	case "SUCCEEDED", "SUCCESS", "COMPLETED":
+		return "completed"
+	case "FAILED", "ERROR":
+		return "failed"
+	case "RUNNING", "PROCESSING":
+		return "processing"
+	case "PENDING", "SUBMITTED":
+		return "submitted"
+	default:
+		return strings.ToLower(status)
+	}
 }
 
 func (e *Engine) getModelModality(modelID string) string {

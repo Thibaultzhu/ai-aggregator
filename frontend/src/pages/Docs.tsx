@@ -1,12 +1,31 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Book, Terminal, Code2, ExternalLink } from 'lucide-react'
+import * as api from '@/lib/api'
 
 export default function Docs() {
+  const [modelCount, setModelCount] = useState<number | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadCatalogSummary() {
+      try {
+        const res = await api.listMarketplaceModels()
+        if (!cancelled) setModelCount(res.count)
+      } catch {
+        if (!cancelled) setModelCount(null)
+      }
+    }
+    loadCatalogSummary()
+    return () => { cancelled = true }
+  }, [])
+
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
       <h1 className="text-4xl font-bold text-white mb-4">API Documentation</h1>
       <p className="text-gray-400 text-lg mb-12">
         Everything you need to integrate AI Aggregator into your application.
+        {modelCount ? ` Current catalog: ${modelCount.toLocaleString()}+ active models.` : ''}
       </p>
 
       {/* Quick Start */}
@@ -40,7 +59,7 @@ export default function Docs() {
           <span className="text-gray-500"># Production</span>{'\n'}
           https://api.aggregator.com/v1{'\n\n'}
           <span className="text-gray-500"># Development</span>{'\n'}
-          http://localhost:8080/v1
+          http://localhost:8081/v1
         </div>
       </section>
 
@@ -71,6 +90,10 @@ export default function Docs() {
             { method: 'POST', path: '/v1/audio/speech', desc: 'Text to speech (TTS)' },
             { method: 'POST', path: '/v1/embeddings', desc: 'Generate text embeddings' },
             { method: 'POST', path: '/v1/files', desc: 'Upload file' },
+            { method: 'GET', path: '/v1/files', desc: 'List uploaded files' },
+            { method: 'GET', path: '/v1/files/:id', desc: 'Get file metadata' },
+            { method: 'GET', path: '/v1/files/:id/content', desc: 'Download file content' },
+            { method: 'DELETE', path: '/v1/files/:id', desc: 'Delete file' },
           ].map(({ method, path, desc }) => (
             <div key={path} className="card px-5 py-3 flex items-center gap-4 hover:border-gray-600 transition-colors">
               <span className={`text-xs font-bold px-2 py-0.5 rounded ${
@@ -90,9 +113,9 @@ export default function Docs() {
         <h2 className="text-2xl font-bold text-white mb-6">SDK Examples</h2>
         <div className="grid sm:grid-cols-3 gap-4">
           {[
-            { lang: 'Python', code: `from openai import OpenAI\n\nclient = OpenAI(\n    base_url="https://api.aggregator.com/v1",\n    api_key="sk-aggr-xxxx"\n)\n\nresponse = client.chat.completions.create(\n    model="qwen-max",\n    messages=[{"role": "user", "content": "Hello!"}]\n)` },
-            { lang: 'Node.js', code: `import OpenAI from 'openai'\n\nconst client = new OpenAI({\n  baseURL: "https://api.aggregator.com/v1",\n  apiKey: "sk-aggr-xxxx"\n})\n\nconst response = await client.chat.completions.create({\n  model: "qwen-max",\n  messages: [{ role: "user", content: "Hello!" }]\n})` },
-            { lang: 'cURL', code: `curl https://api.aggregator.com/v1/chat/completions \\\\\n  -H "Authorization: Bearer sk-aggr-xxxx" \\\\\n  -H "Content-Type: application/json" \\\\\n  -d '{"model":"qwen-max","messages":[{"role":"user","content":"Hello!"}]}'` },
+            { lang: 'Python', code: `from openai import OpenAI\n\nclient = OpenAI(\n    base_url="http://localhost:8081/v1",\n    api_key="sk-aggr-xxxx"\n)\n\nresponse = client.chat.completions.create(\n    model="qwen-max",\n    messages=[{"role": "user", "content": "Hello!"}]\n)` },
+            { lang: 'Node.js', code: `import OpenAI from 'openai'\n\nconst client = new OpenAI({\n  baseURL: "http://localhost:8081/v1",\n  apiKey: "sk-aggr-xxxx"\n})\n\nconst response = await client.chat.completions.create({\n  model: "qwen-max",\n  messages: [{ role: "user", content: "Hello!" }]\n})` },
+            { lang: 'cURL', code: `curl http://localhost:8081/v1/chat/completions \\\\\n  -H "Authorization: Bearer sk-aggr-xxxx" \\\\\n  -H "Content-Type: application/json" \\\\\n  -d '{"model":"qwen-max","messages":[{"role":"user","content":"Hello!"}]}'` },
           ].map(({ lang, code }) => (
             <div key={lang} className="card p-1">
               <div className="px-4 py-2 border-b border-gray-800 text-sm font-medium text-gray-300">{lang}</div>

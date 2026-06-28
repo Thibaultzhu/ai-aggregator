@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"ai-aggregator/internal/config"
+	"ai-aggregator/internal/filestore"
 	"ai-aggregator/internal/gateway"
 	"ai-aggregator/internal/metrics"
 	"ai-aggregator/internal/router"
@@ -69,15 +70,20 @@ func main() {
 
 	// ===== Init Metrics =====
 	metricsCollector := metrics.NewCollector()
+	if cfg.FileStorageBackend != "" && cfg.FileStorageBackend != "local" {
+		slog.Warn("unsupported FILE_STORAGE_BACKEND; falling back to local file store", "backend", cfg.FileStorageBackend)
+	}
+	fileStore := filestore.NewLocalStore(cfg.FileStorageDir)
 
 	// ===== Init Gateway =====
 	gw := gateway.New(gateway.Deps{
-		Config:   cfg,
-		Store:    store,
-		Router:   modelRouter,
-		// Tasks:  taskEngine,  // TODO: re-enable after MVP
-		Metrics:  metricsCollector,
-		Logger:   logger,
+		Config:    cfg,
+		Store:     store,
+		Router:    modelRouter,
+		Tasks:     taskEngine,
+		Metrics:   metricsCollector,
+		FileStore: fileStore,
+		Logger:    logger,
 	})
 
 	// ===== Start Server =====

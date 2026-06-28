@@ -20,6 +20,11 @@ type Middleware struct {
 	keyPrefix string
 }
 
+type JWTClaims struct {
+	UserID string
+	Role   string
+}
+
 func NewMiddleware(store *storage.Store, jwtSecret, keyPrefix string) *Middleware {
 	return &Middleware{
 		store:     store,
@@ -103,42 +108,61 @@ func (m *Middleware) RequireAdmin(c *fiber.Ctx) error {
 func (m *Middleware) authenticateAPIKey(c *fiber.Ctx, key string) error {
 	// Hash the key and look it up
 	keyHash := hashAPIKey(key)
-	userID, keyID, perms, err := m.store.ValidateAPIKey(c.UserContext(), keyHash)
+	userID, keyID, workspaceID, projectID, perms, rateLimitRPM, rateLimitTPM, err := m.store.ValidateAPIKey(c.UserContext(), keyHash)
 	if err != nil {
 		return c.Status(401).JSON(errorAuth("invalid or expired API key"))
 	}
 
 	c.Locals("user_id", userID)
 	c.Locals("api_key_id", keyID)
+	c.Locals("workspace_id", workspaceID)
+	c.Locals("project_id", projectID)
 	c.Locals("auth_type", "api_key")
 	c.Locals("permissions", perms)
+	if rateLimitRPM > 0 {
+		c.Locals("rate_limit_rpm", rateLimitRPM)
+	}
+	if rateLimitTPM > 0 {
+		c.Locals("rate_limit_tpm", rateLimitTPM)
+	}
 	return c.Next()
 }
 
 func (m *Middleware) authenticateJWT(c *fiber.Ctx, tokenStr string) error {
+	claims, err := ValidateJWT(m.jwtSecret, tokenStr)
+	if err != nil {
+		return c.Status(401).JSON(errorAuth("invalid or expired JWT"))
+	}
+
+	c.Locals("user_id", claims.UserID)
+	c.Locals("user_role", claims.Role)
+	c.Locals("auth_type", "jwt")
+	return c.Next()
+}
+
+func ValidateJWT(secret []byte, tokenStr string) (*JWTClaims, error) {
 	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-		return m.jwtSecret, nil
+		return secret, nil
 	})
 
 	if err != nil || !token.Valid {
-		return c.Status(401).JSON(errorAuth("invalid or expired JWT"))
+		return nil, fmt.Errorf("invalid or expired JWT")
 	}
 
-	claims, ok := token.Claims.(jwt.MapClaims)
+	mapClaims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		return c.Status(401).JSON(errorAuth("invalid JWT claims"))
+		return nil, fmt.Errorf("invalid JWT claims")
 	}
 
-	userID, _ := claims["uid"].(string)
-	role, _ := claims["role"].(string)
-
-	c.Locals("user_id", userID)
-	c.Locals("user_role", role)
-	c.Locals("auth_type", "jwt")
-	return c.Next()
+	userID, _ := mapClaims["uid"].(string)
+	role, _ := mapClaims["role"].(string)
+	if userID == "" || role == "" {
+		return nil, fmt.Errorf("invalid JWT claims")
+	}
+	return &JWTClaims{UserID: userID, Role: role}, nil
 }
 
 // ===== Helpers =====

@@ -122,6 +122,8 @@ curl -s -X POST $BASE_URL/api/user/auth/login \
 
 Requires JWT. The plaintext key is returned **only once** -- store it securely.
 
+`workspace_id` is optional. When present, usage from this API key is attributed to that workspace in request logs, usage logs, billing transactions, and workspace usage summary.
+
 ```bash
 curl -s -X POST $BASE_URL/api/user/keys \
   -H "Authorization: Bearer $TOKEN" \
@@ -135,8 +137,21 @@ curl -s -X POST $BASE_URL/api/user/keys \
   "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
   "name": "my-app",
   "key": "sk-aag-a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
-  "prefix": "sk-aag-"
+  "prefix": "sk-aag-",
+  "workspace_id": ""
 }
+```
+
+Workspace-bound example:
+
+```bash
+curl -s -X POST $BASE_URL/api/user/keys \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "workspace-app",
+    "workspace_id": "338527fb-6956-49e0-b1f4-a5d3d6c13f76"
+  }' | jq .
 ```
 
 Save the API key:
@@ -164,6 +179,7 @@ curl -s $BASE_URL/api/user/keys \
       "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
       "name": "my-app",
       "key_prefix": "sk-aag-",
+      "workspace_id": "338527fb-6956-49e0-b1f4-a5d3d6c13f76",
       "permissions": null,
       "is_active": true,
       "last_used_at": "2025-01-15T10:30:00Z",
@@ -234,6 +250,72 @@ curl -s $BASE_URL/v1/models \
     }
   ]
 }
+```
+
+---
+
+## Create Embeddings
+
+Requires API key. Returns an OpenAI-compatible embeddings response.
+
+```bash
+curl -s -X POST $BASE_URL/v1/embeddings \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "text-embedding-v3",
+    "input": "hello embedding"
+  }' | jq .
+```
+
+---
+
+## Image Generation
+
+Requires API key. Image generation is asynchronous.
+
+```bash
+curl -s -X POST $BASE_URL/v1/images/generations \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "wan-image",
+    "prompt": "a simple red cube",
+    "n": 1,
+    "size": "1024*1024"
+  }' | jq .
+```
+
+Poll task status:
+
+```bash
+curl -s $BASE_URL/v1/images/generations/task_xxx \
+  -H "Authorization: Bearer $API_KEY" | jq .
+```
+
+---
+
+## Video Generation
+
+Requires API key. Video generation is asynchronous.
+
+```bash
+curl -s -X POST $BASE_URL/v1/video/generations \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "wan2.7-t2v",
+    "prompt": "a simple red cube rotating",
+    "duration": 5,
+    "resolution": "720p"
+  }' | jq .
+```
+
+Poll task status:
+
+```bash
+curl -s $BASE_URL/v1/video/generations/task_xxx \
+  -H "Authorization: Bearer $API_KEY" | jq .
 ```
 
 ---
@@ -550,4 +632,189 @@ const response = await client.chat.completions.create({
 });
 
 console.log(response.choices[0].message.content);
+```
+
+---
+
+## v0.2 Observability and Provider Health
+
+### Admin Model / Provider Management
+
+Admin JWT is required.
+
+```bash
+curl -s "$BASE_URL/api/admin/models" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" | jq .
+```
+
+```bash
+curl -s "$BASE_URL/api/admin/models/qwen-plus" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" | jq .
+```
+
+Update pricing or status:
+
+```bash
+curl -s -X PUT "$BASE_URL/api/admin/models/qwen-plus" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "display_name": "通义千问 Plus",
+    "modality": "text",
+    "capabilities": ["chat", "completion", "function_call"],
+    "input_price": 0.0008,
+    "output_price": 0.002,
+    "price_unit": "per_1k_tokens",
+    "supports_stream": true,
+    "is_async": false,
+    "status": "active"
+  }' | jq .
+```
+
+Model-provider binding:
+
+```bash
+curl -s -X PUT "$BASE_URL/api/admin/models/qwen-plus/providers/bailian_cn" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "priority": 1,
+    "upstream_model": "qwen-plus",
+    "cost_multiplier": 1,
+    "timeout_ms": 30000,
+    "max_retries": 2,
+    "is_enabled": true
+  }' | jq .
+```
+
+Admin writes refresh the router registry, so price/status/binding changes are used by the next request.
+
+### Request Logs
+
+```bash
+curl -s "$BASE_URL/api/user/request-logs?limit=20" \
+  -H "Authorization: Bearer $TOKEN" | jq .
+```
+
+```bash
+REQUEST_ID="req-or-fiber-request-id"
+curl -s "$BASE_URL/api/user/request-logs/$REQUEST_ID" \
+  -H "Authorization: Bearer $TOKEN" | jq .
+```
+
+### Provider Health (Admin JWT required)
+
+```bash
+curl -s "$BASE_URL/api/admin/provider-health" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" | jq .
+```
+
+Trigger a manual provider health check:
+
+```bash
+curl -s -X POST "$BASE_URL/api/admin/providers/bailian_cn/health-check" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" | jq .
+```
+
+### Local fallback test
+
+In mock mode, force one provider to fail chat/stream calls while leaving health checks healthy:
+
+```bash
+MOCK_FAIL_PROVIDER_IDS=bailian_cn docker compose up -d --build backend
+```
+
+Then call `/v1/chat/completions` for a model with a secondary provider. Expected result:
+
+```text
+request_logs.final_provider_id = secondary provider
+request_logs.fallback_count > 0
+fallback_logs contains bailian_cn -> secondary provider
+```
+
+Or run the optional fallback smoke-test against a backend that is already started with `MOCK_FAIL_PROVIDER_IDS=bailian_cn`:
+
+```bash
+BASE_URL=http://localhost:8081 MOCK_PROVIDER_MODE=true RUN_FALLBACK_SMOKE=true bash scripts/smoke-test.sh
+```
+
+Restore normal behavior:
+
+```bash
+MOCK_FAIL_PROVIDER_IDS= docker compose up -d --build backend
+```
+
+---
+
+## v0.3 Enterprise Foundation
+
+The v0.3 schema foundation is in:
+
+```text
+migrations/004_v03_enterprise_foundation.sql
+```
+
+It adds organization/workspace/RBAC/FinOps base tables and nullable workspace attribution fields. Current scope is schema only; organization/workspace APIs, RBAC enforcement, budget blocking, and workspace usage UI are still planned.
+
+### Organization / Workspace Admin APIs
+
+Admin JWT is required.
+
+Create an organization:
+
+```bash
+curl -s -X POST "$BASE_URL/api/admin/organizations" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Acme AI",
+    "slug": "acme-ai",
+    "billing_mode": "prepaid"
+  }' | jq .
+```
+
+Create a workspace:
+
+```bash
+curl -s -X POST "$BASE_URL/api/admin/workspaces" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "organization_id": "org-uuid",
+    "name": "Production",
+    "slug": "production",
+    "monthly_budget_usd": 1000
+  }' | jq .
+```
+
+Add a workspace member:
+
+```bash
+curl -s -X POST "$BASE_URL/api/admin/workspaces/$WORKSPACE_ID/members" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user-uuid",
+    "role_name": "member",
+    "status": "active"
+  }' | jq .
+```
+
+Workspace usage summary:
+
+```bash
+curl -s "$BASE_URL/api/admin/workspaces/$WORKSPACE_ID/usage" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" | jq .
+```
+
+Current v0.3 limitations:
+
+```text
+API keys can be bound to workspace_id, but automatic default workspace assignment is not implemented yet.
+Budget / quota tables exist, but runtime enforcement is not implemented yet.
+RBAC roles exist at schema level, but request authorization still uses admin JWT only.
+Audio endpoints are wired through the gateway and DashScope adapter:
+`POST /v1/audio/speech` returns provider audio bytes, and
+`POST /v1/audio/transcriptions` accepts multipart uploads and returns transcription text.
+The local DashScope audio chain is covered by `scripts/regression/dashscope-audio-chain.sh`.
 ```

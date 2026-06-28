@@ -1,9 +1,41 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, Zap, Globe, Shield, Cpu, Code2, Image, Video, Mic, MessageSquare } from 'lucide-react'
-import { mockModels } from '@/lib/mockData'
+import * as api from '@/lib/api'
+import type { ModelInfo } from '@/lib/api'
 import { formatCurrency, getModalityColor } from '@/lib/utils'
 
 export default function Landing() {
+  const [featuredModels, setFeaturedModels] = useState<ModelInfo[]>([])
+  const [modelCount, setModelCount] = useState<number | null>(null)
+  const [loadingModels, setLoadingModels] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadFeaturedModels() {
+      setLoadingModels(true)
+      try {
+        const res = await api.listMarketplaceModels()
+        if (cancelled) return
+        setModelCount(res.count)
+        setFeaturedModels(
+          [...res.data]
+            .sort((a, b) => (b.marketplace_score ?? 0) - (a.marketplace_score ?? 0))
+            .slice(0, 8),
+        )
+      } catch {
+        if (!cancelled) {
+          setModelCount(null)
+          setFeaturedModels([])
+        }
+      } finally {
+        if (!cancelled) setLoadingModels(false)
+      }
+    }
+    loadFeaturedModels()
+    return () => { cancelled = true }
+  }, [])
+
   return (
     <div>
       {/* Hero */}
@@ -19,7 +51,7 @@ export default function Landing() {
               </span>
             </h1>
             <p className="mt-6 text-lg text-gray-400 max-w-2xl mx-auto leading-relaxed">
-              Access 1000+ top-tier AI models through a single OpenAI-compatible API.
+              Access {formatModelCount(modelCount)} top-tier AI models through a single OpenAI-compatible API.
               Text, image, video, audio — one key, unlimited creativity.
             </p>
             <div className="mt-8 flex items-center justify-center gap-4">
@@ -65,11 +97,20 @@ export default function Landing() {
           </Link>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {mockModels.slice(0, 8).map((model) => (
-            <ModelCard key={model.id} model={model} />
-          ))}
-        </div>
+        {loadingModels ? (
+          <div className="card p-10 text-center text-gray-500">Loading featured models...</div>
+        ) : featuredModels.length === 0 ? (
+          <div className="card p-10 text-center">
+            <p className="text-gray-500">Featured models are unavailable right now.</p>
+            <Link to="/models" className="text-sm text-brand-400 hover:text-brand-300 mt-2 inline-block">Open model marketplace</Link>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {featuredModels.map((model) => (
+              <ModelCard key={model.id} model={model} />
+            ))}
+          </div>
+        )}
       </section>
 
       {/* Provider Marquee */}
@@ -153,7 +194,7 @@ data: [DONE]`}
 
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
           {[
-            { icon: Globe, title: '1000+ Models', desc: 'Text, image, video, audio, embedding — all modalities covered' },
+            { icon: Globe, title: `${formatModelCount(modelCount)} Models`, desc: 'Text, image, video, audio, embedding — all modalities covered' },
             { icon: Zap, title: 'Fast Inference', desc: 'Optimized routing, connection pooling, and GA-accelerated endpoints' },
             { icon: Cpu, title: 'Auto Scaling', desc: 'Elastic infrastructure that scales with your demand, pay per use' },
             { icon: Shield, title: 'Enterprise Ready', desc: 'API key management, rate limiting, usage analytics, SOC 2' },
@@ -188,6 +229,9 @@ data: [DONE]`}
 // ===== Sub-components =====
 
 function DemoCard() {
+  const demoPrompt = 'A serene Japanese garden with cherry blossoms at sunset, watercolor style'
+  const playgroundUrl = `/playground?tab=image&model=wan-image&prompt=${encodeURIComponent(demoPrompt)}`
+
   return (
     <div className="card border-gray-700 shadow-2xl shadow-brand-500/5">
       {/* Tabs */}
@@ -215,7 +259,7 @@ function DemoCard() {
           <textarea
             className="input h-32 resize-none"
             placeholder="A serene Japanese garden with cherry blossoms at sunset, watercolor style..."
-            defaultValue="A serene Japanese garden with cherry blossoms at sunset, watercolor style"
+            defaultValue={demoPrompt}
           />
           <div className="mt-3 flex items-center gap-3">
             <select className="input w-auto text-sm">
@@ -227,9 +271,9 @@ function DemoCard() {
               <option>1536x1024</option>
             </select>
           </div>
-          <button className="btn-primary w-full mt-4 flex items-center justify-center gap-2">
-            <Zap className="w-4 h-4" /> Generate
-          </button>
+          <Link to={playgroundUrl} className="btn-primary w-full mt-4 flex items-center justify-center gap-2">
+            <Zap className="w-4 h-4" /> Open in Playground
+          </Link>
         </div>
         <div className="bg-gray-800/50 rounded-xl flex items-center justify-center min-h-[240px]">
           <div className="text-center text-gray-600">
@@ -242,48 +286,52 @@ function DemoCard() {
   )
 }
 
-function ModelCard({ model }: { model: typeof mockModels[0] }) {
-  const priceText = model.modality === 'text'
-    ? `${formatCurrency(model.pricing.input!)}/1K in`
-    : model.modality === 'image'
-    ? `${formatCurrency(model.pricing.perImage!)}/img`
-    : model.modality === 'video'
-    ? `${formatCurrency(model.pricing.perSecond!)}/sec`
-    : model.modality === 'audio'
-    ? `${formatCurrency(model.pricing.perSecond || model.pricing.perCharacter!)}/${model.pricing.unit === 'per_second' ? 'sec' : 'char'}`
-    : `${formatCurrency(model.pricing.input!)}/1K`
+function ModelCard({ model }: { model: ModelInfo }) {
+  const priceText = formatModelPrice(model)
+  const title = model.display_name || model.id
+  const capabilities = model.capabilities?.length ? model.capabilities : model.tags || []
 
   return (
-    <Link to={`/models#${model.modelId}`} className="card-hover group cursor-pointer">
-      {model.thumbnail && (
-        <div className="aspect-video bg-gray-800 overflow-hidden">
-          <img
-            src={model.thumbnail}
-            alt={model.displayName}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-          />
+    <Link to={`/models#${model.id}`} className="card-hover group cursor-pointer">
+      <div className="aspect-video bg-gray-900 overflow-hidden flex items-center justify-center">
+        <div className={`rounded-full border px-3 py-1 text-xs capitalize ${getModalityColor(model.modality)}`}>
+          {model.modality}
         </div>
-      )}
+      </div>
       <div className="p-4">
         <div className="flex items-center justify-between mb-2">
           <span className={`badge border ${getModalityColor(model.modality)}`}>
             {model.modality}
           </span>
-          {model.discount && (
-            <span className="badge-discount">{model.discount}% OFF</span>
+          {model.availability_label && (
+            <span className="badge bg-gray-800 text-gray-400">{model.availability_label}</span>
           )}
         </div>
         <h3 className="font-semibold text-white group-hover:text-brand-400 transition-colors">
-          {model.provider} / {model.modelId}
+          {title}
         </h3>
-        <p className="text-sm text-gray-500 mt-1 line-clamp-2">{model.description}</p>
+        <p className="text-sm text-gray-500 mt-1 line-clamp-2">
+          {model.recommended_use || capabilities.slice(0, 3).join(', ') || model.id}
+        </p>
         <div className="mt-3 flex items-center justify-between">
           <span className="text-sm font-mono text-brand-400">{priceText}</span>
           <span className="text-xs text-gray-600">
-            {model.supportsStream ? '⚡ Stream' : model.isAsync ? '⏳ Async' : ''}
+            {model.supports_stream ? 'Stream' : model.is_async ? 'Async' : `${model.healthy_providers ?? 0}/${model.provider_count ?? 0} providers`}
           </span>
         </div>
       </div>
     </Link>
   )
+}
+
+function formatModelPrice(model: ModelInfo) {
+  const price = model.input_price ?? model.output_price
+  if (price === null || price === undefined) return 'Contact us'
+  const unit = model.price_unit ? `/${model.price_unit.replace(/^per_/, '')}` : ''
+  return `${formatCurrency(price)}${unit}`
+}
+
+function formatModelCount(count: number | null) {
+  if (!count) return 'multiple'
+  return `${count.toLocaleString()}+`
 }

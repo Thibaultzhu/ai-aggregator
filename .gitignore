@@ -4,6 +4,12 @@ frontend/node_modules/
 
 # Build output
 frontend/dist/
+frontend/tsconfig.tsbuildinfo
+
+# Project-local toolchain/cache
+.local/
+.docker-buildx/
+.docker-config/
 
 # Environment files
 .env
@@ -31,3 +37,6 @@ docker-compose.override.yml
 
 # Logs
 *.log
+
+# Generated archives
+*.zip

@@ -11,6 +11,8 @@ export default function ApiKeys() {
   // Create form state
   const [showCreate, setShowCreate] = useState(false)
   const [newKeyName, setNewKeyName] = useState('')
+  const [newWorkspaceId, setNewWorkspaceId] = useState('')
+  const [newProjectId, setNewProjectId] = useState('')
   const [creating, setCreating] = useState(false)
 
   // Newly created key display (shown once)
@@ -49,12 +51,14 @@ export default function ApiKeys() {
     if (!newKeyName.trim()) return
     setCreating(true)
     try {
-      const res = await api.createKey(newKeyName.trim())
+      const res = await api.createKey(newKeyName.trim(), newWorkspaceId.trim() || undefined, newProjectId.trim() || undefined)
       // Persist the full key to localStorage so Playground can use it
       api.setCurrentApiKey(res.key)
       setNewKey(res)
       setShowCreate(false)
       setNewKeyName('')
+      setNewWorkspaceId('')
+      setNewProjectId('')
       // Refresh the key list (the new key will appear with prefix only)
       await fetchKeys()
     } catch (err) {
@@ -195,6 +199,32 @@ export default function ApiKeys() {
                   autoFocus
                 />
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-400 mb-1.5">Workspace ID (optional)</label>
+                <input
+                  className="input"
+                  placeholder="Bind this key to a workspace UUID"
+                  value={newWorkspaceId}
+                  onChange={(e) => setNewWorkspaceId(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleCreate() }}
+                />
+                <p className="text-xs text-gray-600 mt-1">
+                  Requests made with this key will be attributed to the workspace.
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-400 mb-1.5">Project ID (optional)</label>
+                <input
+                  className="input"
+                  placeholder="Bind this key to a project UUID"
+                  value={newProjectId}
+                  onChange={(e) => setNewProjectId(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleCreate() }}
+                />
+                <p className="text-xs text-gray-600 mt-1">
+                  Project ID requires a matching Workspace ID.
+                </p>
+              </div>
               <div className="flex items-center gap-3 pt-2">
                 <button
                   onClick={handleCreate}
@@ -211,7 +241,7 @@ export default function ApiKeys() {
                   )}
                 </button>
                 <button
-                  onClick={() => { setShowCreate(false); setNewKeyName('') }}
+                  onClick={() => { setShowCreate(false); setNewKeyName(''); setNewWorkspaceId('') }}
                   className="btn-ghost"
                   disabled={creating}
                 >
@@ -320,6 +350,8 @@ export default function ApiKeys() {
                       : key.permissions.models.join(', ')}
                   </span>
                   <span>Created: {new Date(key.created_at).toLocaleDateString()}</span>
+                  {key.workspace_id && <span>Workspace: <code>{key.workspace_id.slice(0, 8)}</code></span>}
+                  {key.project_id && <span>Project: <code>{key.project_id.slice(0, 8)}</code></span>}
                 </div>
               </div>
             )

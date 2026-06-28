@@ -64,6 +64,8 @@ export interface ApiKeyInfo {
   id: string
   name: string
   key_prefix: string
+  workspace_id?: string
+  project_id?: string
   permissions: { models: string | string[] }
   is_active: boolean
   last_used_at: string | null
@@ -83,6 +85,49 @@ export interface UsageRecord {
   charged_cost_usd: number
   status_code: number
   created_at: string
+}
+
+export interface RequestLog {
+  request_id: string
+  user_id?: string
+  api_key_id?: string
+  model_id?: string
+  provider_id?: string
+  final_provider_id?: string
+  credential_scope?: string
+  credential_key_id?: string
+  method: string
+  path: string
+  status_code: number
+  error_code?: string
+  error_message?: string
+  latency_ms: number
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  charged_cost_usd: number
+  upstream_cost_usd: number
+  gross_margin_usd: number
+  fallback_count: number
+  request_preview?: string
+  response_preview?: string
+  created_at: string
+}
+
+export interface ProviderHealth {
+  provider_id: string
+  display_name: string
+  adapter_type: string
+  status: 'healthy' | 'unhealthy' | 'degraded' | 'unknown'
+  latency_ms: number
+  error_code?: string
+  error_message?: string
+  checked_at: string
+  request_count_24h?: number
+  error_count_24h?: number
+  error_rate_24h?: number
+  fallback_count_24h?: number
+  avg_request_latency_ms_24h?: number
 }
 
 // ===== Playground =====
